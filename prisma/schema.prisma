@@ -21,6 +21,7 @@ model user {
   linkden       String?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
+  jellyfinUsername String?
 
   session        session[]
   account        account[]
@@ -28,6 +29,8 @@ model user {
   Comment        Comment[]
   RecentlyViewed RecentlyViewed[]
   Favorite       Favorite[]
+  movieNights    MovieNight[]        @relation("organizer")
+  attendances    MovieNightAttendee[]
 }
 
 model session {
@@ -137,4 +140,47 @@ model RecentlyViewed {
   season     Int?
   episodeId  Int?
   createdAt  DateTime @default(now())
+}
+
+model MovieNight {
+  id                  String @id @default(uuid())
+  title               String
+  description         String?
+  movieTitle          String
+  moviePosterPath     String?
+  movieOverview       String?
+  tmdbMovieId         String?
+  jellyfinItemId      String?
+  jellyfinServerUrl   String?
+  scheduledTime       DateTime
+  timezone            String @default("UTC")
+  organizerId         String
+  organizer           user   @relation("organizer", fields: [organizerId], references: [id])
+  maxAttendees        Int?
+  telegramChatId      String?
+  telegramMessageId   String?
+  syncplaySessionId   String?
+  status              String @default("scheduled") // scheduled, in_progress, completed, cancelled
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  attendees           MovieNightAttendee[]
+
+  @@index([organizerId])
+  @@index([scheduledTime])
+}
+
+model MovieNightAttendee {
+  id                  String @id @default(uuid())
+  movieNightId        String
+  userId              String
+  movieNight          MovieNight @relation(fields: [movieNightId], references: [id], onDelete: Cascade)
+  user                user   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  status              String @default("maybe") // going, maybe, declined
+  joinedAt            DateTime @default(now())
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@unique([movieNightId, userId])
+  @@index([movieNightId])
+  @@index([userId])
 }
