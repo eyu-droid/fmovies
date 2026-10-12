@@ -2,6 +2,8 @@
 
 import { db } from "@/lib/db"
 import { revalidatePath } from "next/cache"
+import { getAuthSession } from "@/lib/auth"
+
 export async function updateUser(formData: FormData, userId: string) {
   const user = await db.user.findFirst({
     where: {
@@ -39,4 +41,69 @@ export async function updateUser(formData: FormData, userId: string) {
     }
   }
   return { error: 'Bad Request' }
+}
+
+export async function createMovieNight(formData: FormData) {
+  const session = await getAuthSession()
+
+  if (!session?.user?.email) {
+    throw new Error('You must be signed in to create a watch party.')
+  }
+
+  const user = await db.user.findUnique({
+    where: {
+      email: session.user.email,
+    },
+  })
+
+  if (!user) {
+    throw new Error('User not found.')
+  }
+
+  const rawTitle = String(formData.get('title') ?? '').trim()
+  const movieTitle = String(formData.get('movieTitle') ?? '').trim()
+  const moviePosterPath = String(formData.get('moviePosterPath') ?? '').trim() || null
+  const movieOverview = String(formData.get('movieOverview') ?? '').trim() || null
+  const tmdbMovieId = String(formData.get('tmdbMovieId') ?? '').trim() || null
+  const jellyfinServerUrl = String(formData.get('jellyfinServerUrl') ?? '').trim() || null
+  const jellyfinItemId = String(formData.get('jellyfinItemId') ?? '').trim() || null
+  const scheduledTimeRaw = String(formData.get('scheduledTime') ?? '').trim()
+  const timezone = String(formData.get('timezone') ?? 'UTC').trim() || 'UTC'
+
+  if (!movieTitle || !scheduledTimeRaw) {
+    throw new Error('Movie and scheduled time are required.')
+  }
+
+  const scheduledTime = new Date(scheduledTimeRaw)
+  if (Number.isNaN(scheduledTime.getTime())) {
+    throw new Error('The selected time is invalid.')
+  }
+
+  const movieNight = await db.movieNight.create({
+    data: {
+      title: rawTitle || `${movieTitle} Movie Night`,
+      description: String(formData.get('description') ?? '').trim() || null,
+      movieTitle,
+      moviePosterPath,
+      movieOverview,
+      tmdbMovieId,
+      jellyfinServerUrl,
+      jellyfinItemId,
+      scheduledTime,
+      timezone,
+      organizerId: user.id,
+      attendees: {
+        create: [{
+          userId: user.id,
+          status: 'going',
+        }],
+      },
+    },
+  })
+
+  revalidatePath('/home')
+  revalidatePath('/home/movie-night')
+  revalidatePath(`/home/movie-night/${movieNight.id}`)
+
+  return { id: movieNight.id }
 }
