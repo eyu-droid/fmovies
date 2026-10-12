@@ -1,109 +1,186 @@
-'use server'
-
-import { db } from "@/lib/db"
-import { revalidatePath } from "next/cache"
-import { getAuthSession } from "@/lib/auth"
-
-export async function updateUser(formData: FormData, userId: string) {
-  const user = await db.user.findFirst({
-    where: {
-      id: userId
-    }
-  })
-  if (user) {
-    if (formData) {
-      const data: Record<string, string | null> = {}
-      const email = formData.get('email') as string
-      const name = formData.get('name') as string
-      const username = formData.get('username') as string
-      const about = formData.get('about') as string
-      const location = formData.get('location') as string
-      const github = formData.get('github') as string
-      const twitter = formData.get('twitter') as string
-      const linkden = formData.get('linkden') as string
-      if (email) data.email = email
-      if (name !== undefined) data.name = name || null
-      if (username !== undefined) data.username = username || null
-      if (about !== undefined) data.about = about || null
-      if (location !== undefined) data.location = location || null
-      if (github !== undefined) data.github = github || null
-      if (twitter !== undefined) data.twitter = twitter || null
-      if (linkden !== undefined) data.linkden = linkden || null
-
-      const updatedUser = await db.user.update({
-        where: {
-          id: userId
-        },
-        data
-      })
-      revalidatePath('/home/user/account')
-      return updatedUser
-    }
-  }
-  return { error: 'Bad Request' }
+generator client {
+  provider = "prisma-client-js"
 }
 
-export async function createMovieNight(formData: FormData) {
-  const session = await getAuthSession()
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
 
-  if (!session?.user?.email) {
-    throw new Error('You must be signed in to create a watch party.')
-  }
+model user {
+  id            String    @id
+  name          String?
+  email         String    @unique
+  emailVerified Boolean   @default(false)
+  image         String?
+  username      String?   @unique
+  about         String?
+  location      String?
+  github        String?
+  twitter       String?
+  linkden       String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  jellyfinUsername String?
 
-  const user = await db.user.findUnique({
-    where: {
-      email: session.user.email,
-    },
-  })
+  session        session[]
+  account        account[]
+  Rating         Rating[]
+  Comment        Comment[]
+  RecentlyViewed RecentlyViewed[]
+  Favorite       Favorite[]
+  movieNights    MovieNight[]        @relation("organizer")
+  attendances    MovieNightAttendee[]
+}
 
-  if (!user) {
-    throw new Error('User not found.')
-  }
+model session {
+  id        String   @id
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  const rawTitle = String(formData.get('title') ?? '').trim()
-  const movieTitle = String(formData.get('movieTitle') ?? '').trim()
-  const moviePosterPath = String(formData.get('moviePosterPath') ?? '').trim() || null
-  const movieOverview = String(formData.get('movieOverview') ?? '').trim() || null
-  const tmdbMovieId = String(formData.get('tmdbMovieId') ?? '').trim() || null
-  const jellyfinServerUrl = String(formData.get('jellyfinServerUrl') ?? '').trim() || null
-  const jellyfinItemId = String(formData.get('jellyfinItemId') ?? '').trim() || null
-  const scheduledTimeRaw = String(formData.get('scheduledTime') ?? '').trim()
-  const timezone = String(formData.get('timezone') ?? 'UTC').trim() || 'UTC'
+  user user @relation(fields: [userId], references: [id])
+}
 
-  if (!movieTitle || !scheduledTimeRaw) {
-    throw new Error('Movie and scheduled time are required.')
-  }
+model account {
+  id                    String    @id
+  userId                String
+  accountId             String
+  providerId            String
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
 
-  const scheduledTime = new Date(scheduledTimeRaw)
-  if (Number.isNaN(scheduledTime.getTime())) {
-    throw new Error('The selected time is invalid.')
-  }
+  user user @relation(fields: [userId], references: [id])
+}
 
-  const movieNight = await db.movieNight.create({
-    data: {
-      title: rawTitle || `${movieTitle} Movie Night`,
-      description: String(formData.get('description') ?? '').trim() || null,
-      movieTitle,
-      moviePosterPath,
-      movieOverview,
-      tmdbMovieId,
-      jellyfinServerUrl,
-      jellyfinItemId,
-      scheduledTime,
-      timezone,
-      organizerId: user.id,
-      attendees: {
-        create: [{
-          userId: user.id,
-          status: 'going',
-        }],
-      },
-    },
-  })
+model verification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
 
-  revalidatePath('/home')
-  revalidatePath('/home/movie-night')
-  revalidatePath(`/home/movie-night/${movieNight.id}`)
+model Rating {
+  id       String @id
+  object   String
+  upVote   Int?
+  downVote Int?
+  userId   String
+  user     user   @relation(fields: [userId], references: [id])
 
-  return { id: movieNight.id }
+  @@unique([object, userId])
+}
+
+model Comment {
+  id          String          @id @default(uuid())
+  content     String
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  userId      String
+  parentId    String?
+  postId      String
+  user        user            @relation(fields: [userId], references: [id])
+  parent      Comment?        @relation("CommentReplies", fields: [parentId], references: [id])
+  replies     Comment[]       @relation("CommentReplies")
+  MovieComment MovieComment[]
+  SeriesComment SeriesComment[]
+
+  @@index([postId])
+}
+
+model MovieComment {
+  id        String  @id
+  movieId   String
+  commentId String
+  comment   Comment @relation(fields: [commentId], references: [id])
+}
+
+model Favorite {
+  id          String @id
+  userId      String
+  mediaId     String
+  MediaType   String
+  title       String
+  poster_path String
+  season      Int?
+  episode     Int?
+  user        user   @relation(fields: [userId], references: [id])
+}
+
+model SeriesComment {
+  id        String @id
+  seriesId  String
+  seasonId  String
+  episodeId String
+  commentId String
+  comment   Comment @relation(fields: [commentId], references: [id])
+}
+
+model RecentlyViewed {
+  id         String   @id
+  mediaId    String
+  MediaType  String
+  userId     String
+  poster_path String
+  title      String
+  user       user     @relation(fields: [userId], references: [id])
+  season     Int?
+  episodeId  Int?
+  createdAt  DateTime @default(now())
+}
+
+model MovieNight {
+  id                String               @id @default(uuid())
+  title             String
+  description       String?
+  movieTitle        String
+  moviePosterPath   String?
+  movieOverview     String?
+  tmdbMovieId       String?
+  jellyfinItemId    String?
+  jellyfinServerUrl String?
+  scheduledTime     DateTime
+  timezone          String               @default("UTC")
+  organizerId       String
+  organizer         user                 @relation("organizer", fields: [organizerId], references: [id])
+  maxAttendees      Int?
+  telegramChatId    String?
+  telegramMessageId String?
+  syncplaySessionId String?
+  status            String               @default("scheduled")
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+  attendees         MovieNightAttendee[]
+
+  @@index([organizerId])
+  @@index([scheduledTime])
+}
+
+model MovieNightAttendee {
+  id           String      @id @default(uuid())
+  movieNightId String
+  userId       String
+  movieNight   MovieNight   @relation(fields: [movieNightId], references: [id], onDelete: Cascade)
+  user         user         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  status       String       @default("maybe")
+  joinedAt     DateTime     @default(now())
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  @@unique([movieNightId, userId])
+  @@index([movieNightId])
+  @@index([userId])
 }
